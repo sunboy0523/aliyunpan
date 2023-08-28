@@ -13,14 +13,15 @@ export interface IAliFileResp {
   items: IAliGetFileModel[]
   itemsKey: Set<string>
   punished_file_count: number
-  
+
   next_marker: string
 
-  m_user_id: string 
-  m_drive_id: string 
-  dirID: string 
-  dirName: string 
-  itemsTotal?: number 
+  m_user_id: string
+  m_drive_id: string
+  dirID: string
+  albumID?: string
+  dirName: string
+  itemsTotal?: number
 }
 
 export function NewIAliFileResp(user_id: string, drive_id: string, dirID: string, dirName: string): IAliFileResp {
@@ -39,13 +40,14 @@ export function NewIAliFileResp(user_id: string, drive_id: string, dirID: string
 }
 
 export default class AliDirFileList {
-  
+
   static LimitMax = 100
   static ItemJsonmask = 'category%2Ccreated_at%2Cdomain_id%2Cdrive_id%2Cfile_extension%2Cfile_id%2Chidden%2Cmime_extension%2Cmime_type%2Cname%2Cparent_file_id%2Cpunish_flag%2Csize%2Cstarred%2Ctype%2Cupdated_at%2Cdescription'
-  
+
   static getFileInfo(item: IAliFileItem, downUrl: string): IAliGetFileModel {
     const size = item.size ? item.size : 0
-    const date = new Date(item.updated_at || item.gmt_deleted || item.last_played_at || '')
+    const file_count = item.file_count || item.image_count || item.video_count || 0
+    const date = new Date(item.updated_at || item.created_at || item.gmt_deleted || item.last_played_at || '')
     const y = date.getFullYear().toString()
     let m: number | string = date.getMonth() + 1
     m = m < 10 ? '0' + m.toString() : m.toString()
@@ -70,10 +72,11 @@ export default class AliDirFileList {
       ext: item.file_extension?.toLowerCase() || '',
       category: item.category || '',
       starred: item.starred || false,
-      time: date.getTime() ,
+      time: date.getTime(),
+      file_count: file_count,
       size: size,
       sizeStr: humanSize(size),
-      timeStr: y + '-' + m + '-' + d + ' ' + h + ':' + minute + ':' + second ,
+      timeStr: y + '-' + m + '-' + d + ' ' + h + ':' + minute + ':' + second,
       icon: 'iconfile-folder',
       isDir: isDir,
       thumbnail: '',
@@ -83,6 +86,7 @@ export default class AliDirFileList {
       const icon = getFileIcon(add.category, add.ext, item.mime_extension, item.mime_type, add.size)
       add.category = icon[0]
       add.icon = icon[1]
+
       if (downUrl) {
         if (downUrl == 'download_url') {
           add.download_url = item.download_url || ''
@@ -116,13 +120,13 @@ export default class AliDirFileList {
       }
     }
     if (item.punish_flag == 2) add.icon = 'iconweifa'
-     else if (item.punish_flag > 0) add.icon = 'iconweixiang'
+    else if (item.punish_flag > 0) add.icon = 'iconweixiang'
 
     return add
   }
 
-  
-  static async ApiDirFileList(user_id: string, drive_id: string, dirID: string, dirName: string, order: string, type: string = ''): Promise<IAliFileResp> {
+
+  static async ApiDirFileList(user_id: string, drive_id: string, dirID: string, dirName: string, order: string, type: string = '', albumID?: string): Promise<IAliFileResp> {
     const dir: IAliFileResp = {
       items: [],
       itemsKey: new Set(),
@@ -131,23 +135,22 @@ export default class AliDirFileList {
       m_user_id: user_id,
       m_drive_id: drive_id,
       dirID: dirID,
-      dirName: dirName
+      dirName: dirName,
+      albumID: albumID
     }
 
     if (!user_id || !drive_id || !dirID) return dir
-
     if (!order) order = 'updated_at asc'
     order = order.replace(' desc', ' DESC').replace(' asc', ' ASC')
     const orders = order.split(' ')
 
     let pageIndex = 0
-    if (dirID == 'video') {
-      await AliDirFileList._ApiVideoListRecent(dir)
-      pageIndex++
-    }
 
     let max: number = useSettingStore().debugFileListMax
-    if (dirID == 'favorite' || dirID.startsWith('color') || dirID.startsWith('search') || dirID.startsWith('video')) max = useSettingStore().debugFavorListMax
+    if (dirID == 'favorite' || dirID.startsWith('color')
+      || dirID.startsWith('search') || dirID.startsWith('video')) {
+      max = useSettingStore().debugFavorListMax
+    }
 
     let needTotal
     do {
@@ -159,9 +162,11 @@ export default class AliDirFileList {
           })
         }
         isGet = await AliDirFileList._ApiFavorFileListOnePage(orders[0], orders[1], dir, pageIndex)
-      } else if (dirID == 'trash') isGet = await AliDirFileList._ApiTrashFileListOnePage(orders[0], orders[1], dir, pageIndex)
-      else if (dirID == 'recover') isGet = await AliDirFileList._ApiDeleteedFileListOnePage(orders[0], orders[1], dir, pageIndex)
-      else if (dirID.startsWith('color')) {
+      } else if (dirID == 'trash') {
+        isGet = await AliDirFileList._ApiTrashFileListOnePage(orders[0], orders[1], dir, pageIndex)
+      } else if (dirID == 'recover') {
+        isGet = await AliDirFileList._ApiDeleteedFileListOnePage(orders[0], orders[1], dir, pageIndex)
+      } else if (dirID.startsWith('color')) {
         if (!needTotal) {
           needTotal = AliDirFileList._ApiSearchFileListCount(dir).then((total) => {
             dir.itemsTotal = total
@@ -175,9 +180,17 @@ export default class AliDirFileList {
           })
         }
         isGet = await AliDirFileList._ApiSearchFileListOnePage(orders[0], orders[1], dir, pageIndex)
-      } else if (dirID == 'video') isGet = await AliDirFileList._ApiVideoListOnePage(orders[0], orders[1], dir, pageIndex)
-      else if (dirID.startsWith('video')) isGet = await AliDirFileList._ApiVideoFileListOnePage(orders[0], orders[1], dir, pageIndex)
-      else {
+      } else if (dirID == 'video') {
+        isGet = await AliDirFileList._ApiVideoListRecent(orders[0], orders[1], dir, pageIndex)
+      } else if (dirID === 'video.recentplay') {
+        isGet = await AliDirFileList._ApiVideoListRecent(orders[0], orders[1], dir, pageIndex)
+      } else if (dirID === 'video.compilation') {
+        isGet = await AliDirFileList._ApiVideoListOnePage(orders[0], orders[1], dir, pageIndex)
+      } else if (dirID === 'mypic') {
+        isGet = await AliDirFileList._ApiAlbumListOnePage(orders[0], orders[1], dir, pageIndex)
+      } else if (albumID && albumID.length > 0) {
+        isGet = await AliDirFileList._ApiAlbumListFilesOnePage(orders[0], orders[1], dir, pageIndex)
+      } else {
         if (!needTotal) {
           needTotal = AliDirFileList._ApiDirFileListCount(dir, type).then((total) => {
             dir.itemsTotal = total
@@ -186,23 +199,24 @@ export default class AliDirFileList {
         isGet = await AliDirFileList._ApiDirFileListOnePage(orders[0], orders[1], dir, type, pageIndex)
       }
 
-      if (isGet != true) {
+      if (!isGet) {
         if (needTotal) dir.itemsTotal = -1
-        break 
+        break
       }
 
       if (dir.next_marker == 'cancel') {
         if (needTotal) dir.itemsTotal = -1
-        break 
+        break
       }
 
       if (dir.items.length >= max && max > 0) {
-        dir.next_marker = '' 
+        dir.next_marker = ''
         break
       }
 
       pageIndex++
-    } while (dir.next_marker)
+    }
+    while (dir.next_marker)
 
     if (needTotal) await needTotal
     return dir
@@ -210,12 +224,14 @@ export default class AliDirFileList {
 
   private static async _ApiDirFileListOnePage(orderby: string, order: string, dir: IAliFileResp, type: string, pageIndex: number): Promise<boolean> {
     let url = 'adrive/v3/file/list'
-    if (useSettingStore().uiShowPanMedia == false) url += '?jsonmask=next_marker%2Cpunished_file_count%2Ctotal_count%2Citems(' + AliDirFileList.ItemJsonmask + ')'
-    else url += '?jsonmask=next_marker%2Cpunished_file_count%2Ctotal_count%2Citems(' + AliDirFileList.ItemJsonmask + '%2Cvideo_media_metadata(duration%2Cwidth%2Cheight%2Ctime)%2Cvideo_preview_metadata%2Fduration%2Cimage_media_metadata)'
-
+    if (useSettingStore().uiShowPanMedia == false) {
+      url += '?jsonmask=next_marker%2Cpunished_file_count%2Ctotal_count%2Citems(' + AliDirFileList.ItemJsonmask + ')'
+    } else {
+      url += '?jsonmask=next_marker%2Cpunished_file_count%2Ctotal_count%2Citems(' + AliDirFileList.ItemJsonmask + '%2Cvideo_media_metadata(duration%2Cwidth%2Cheight%2Ctime)%2Cvideo_preview_metadata%2Fduration%2Cimage_media_metadata)'
+    }
     let postData = {
       drive_id: dir.m_drive_id,
-      parent_file_id: dir.dirID,
+      parent_file_id: dir.dirID.includes('root') ? 'root' : dir.dirID,
       marker: dir.next_marker,
       limit: 200,
       all: false,
@@ -226,15 +242,16 @@ export default class AliDirFileList {
     }
     if (type) {
       postData = Object.assign(postData, { type })
-      pageIndex = -1 
+      pageIndex = -1
     }
     const resp = await AliHttp.Post(url, postData, dir.m_user_id, '')
     return AliDirFileList._FileListOnePage(orderby, order, dir, resp, pageIndex, type)
   }
 
-  
+
   private static async _ApiDirFileListCount(dir: IAliFileResp, type: string): Promise<number> {
     const url = 'adrive/v3/file/search'
+    let parent_file_id = dir.dirID.includes('_root') ? 'root' : dir.dirID
     const postData = {
       drive_id: dir.m_drive_id,
       marker: '',
@@ -242,15 +259,15 @@ export default class AliDirFileList {
       all: false,
       url_expire_sec: 14400,
       fields: 'thumbnail',
-      query: 'parent_file_id="' + dir.dirID + '"' + (type ? ' and type="' + type + '"' : ''),
+      query: 'parent_file_id="' + parent_file_id + '"' + (type ? ' and type="' + type + '"' : ''),
       return_total_count: true
     }
     const resp = await AliHttp.Post(url, postData, dir.m_user_id, '')
     try {
       if (AliHttp.IsSuccess(resp.code)) {
         return resp.body.total_count || 0
-      } else {
-        DebugLog.mSaveWarning('_ApiDirFileListCount err=' + dir.dirID + ' ' + (resp.code || ''))
+      } else if (!AliHttp.HttpCodeBreak(resp.code)) {
+        DebugLog.mSaveWarning('_ApiDirFileListCount err=' + dir.dirID + ' ' + (resp.code || ''), resp.body)
       }
     } catch (err: any) {
       DebugLog.mSaveDanger('_ApiDirFileListCount ' + dir.dirID, err)
@@ -258,7 +275,7 @@ export default class AliDirFileList {
     return 0
   }
 
-  
+
   private static async _ApiFavoriteFileListCount(dir: IAliFileResp): Promise<number> {
     const url = 'adrive/v3/file/search'
     const postData = {
@@ -275,8 +292,8 @@ export default class AliDirFileList {
     try {
       if (AliHttp.IsSuccess(resp.code)) {
         return resp.body.total_count || 0
-      } else {
-        DebugLog.mSaveWarning('_ApiFavoriteFileListCount err=' + dir.dirID + ' ' + (resp.code || ''))
+      } else if (!AliHttp.HttpCodeBreak(resp.code)) {
+        DebugLog.mSaveWarning('_ApiFavoriteFileListCount err=' + dir.dirID + ' ' + (resp.code || ''), resp.body)
       }
     } catch (err: any) {
       DebugLog.mSaveDanger('_ApiFavoriteFileListCount ' + dir.dirID, err)
@@ -337,14 +354,13 @@ export default class AliDirFileList {
     if (useSettingStore().uiShowPanMedia == false) url += '?jsonmask=next_marker%2Cpunished_file_count%2Ctotal_count%2Citems(' + AliDirFileList.ItemJsonmask + ')'
     else url += '?jsonmask=next_marker%2Cpunished_file_count%2Ctotal_count%2Citems(' + AliDirFileList.ItemJsonmask + '%2Cvideo_media_metadata(duration%2Cwidth%2Cheight%2Ctime)%2Cvideo_preview_metadata%2Fduration%2Cimage_media_metadata)'
 
-    
-    
+
     let query = ''
     if (dir.dirID.startsWith('color')) {
       const color = dir.dirID.substring('color'.length).split(' ')[0].replace('#', 'c')
       query = 'description="' + color + '"'
     } else if (dir.dirID.startsWith('search')) {
-      const search = dir.dirID.substring('search'.length).split(' ') 
+      const search = dir.dirID.substring('search'.length).split(' ')
 
       let word = ''
       for (let i = 0; i < search.length; i++) {
@@ -361,8 +377,8 @@ export default class AliDirFileList {
           const arr = v.split(',')
           let type = ''
           for (let j = 0; j < arr.length; j++) {
-            if (arr[j] == 'folder') type += 'type="' + arr[j] + '" or ' 
-            else if (arr[j]) type += 'category="' + arr[j] + '" or ' 
+            if (arr[j] == 'folder') type += 'type="' + arr[j] + '" or '
+            else if (arr[j]) type += 'category="' + arr[j] + '" or '
           }
           type = type.substring(0, type.length - 4).trim()
           if (type && type.indexOf(' or ') > 0) query += '(' + type + ') and '
@@ -388,19 +404,19 @@ export default class AliDirFileList {
           for (let j = 0; j < arr.length; j++) {
             extin += '"' + arr[j] + '",'
           }
-          if (extin.length > 0) extin = extin.substring(0, extin.length - 1) 
+          if (extin.length > 0) extin = extin.substring(0, extin.length - 1)
           if (extin) query += 'file_extension in [' + extin + '] and '
         } else if (k == 'fav') query += 'starred = ' + v + ' and '
       }
       word = word.trim()
       if (word) query += 'name match "' + word.replaceAll('"', '\\"') + '" and '
-      if (query.length > 0) query = query.substring(0, query.length - 5) 
+      if (query.length > 0) query = query.substring(0, query.length - 5)
       if (query.startsWith('(') && query.endsWith(')')) query = query.substring(1, query.length - 1)
     }
     const postData = {
       drive_id: dir.m_drive_id,
       marker: dir.next_marker,
-      limit: 100 ,
+      limit: 100,
       fields: '*',
       query: query,
       order_by: orderby + ' ' + order
@@ -411,14 +427,14 @@ export default class AliDirFileList {
 
   static async _ApiSearchFileListCount(dir: IAliFileResp): Promise<number> {
     const url = 'adrive/v3/file/search'
-    
-    
+
+
     let query = ''
     if (dir.dirID.startsWith('color')) {
       const color = dir.dirID.substring('color'.length).split(' ')[0].replace('#', 'c')
       query = 'description="' + color + '"'
     } else if (dir.dirID.startsWith('search')) {
-      const search = dir.dirID.substring('search'.length).split(' ') 
+      const search = dir.dirID.substring('search'.length).split(' ')
 
       let word = ''
       for (let i = 0; i < search.length; i++) {
@@ -435,8 +451,8 @@ export default class AliDirFileList {
           const arr = v.split(',')
           let type = ''
           for (let j = 0; j < arr.length; j++) {
-            if (arr[j] == 'folder') type += 'type="' + arr[j] + '" or ' 
-            else if (arr[j]) type += 'category="' + arr[j] + '" or ' 
+            if (arr[j] == 'folder') type += 'type="' + arr[j] + '" or '
+            else if (arr[j]) type += 'category="' + arr[j] + '" or '
           }
           type = type.substring(0, type.length - 4).trim()
           if (type && type.indexOf(' or ') > 0) query += '(' + type + ') and '
@@ -462,19 +478,19 @@ export default class AliDirFileList {
           for (let j = 0; j < arr.length; j++) {
             extin += '"' + arr[j] + '",'
           }
-          if (extin.length > 0) extin = extin.substring(0, extin.length - 1) 
+          if (extin.length > 0) extin = extin.substring(0, extin.length - 1)
           if (extin) query += 'file_extension in [' + extin + '] and '
         } else if (k == 'fav') query += 'starred = ' + v + ' and '
       }
       word = word.trim()
       if (word) query += 'name match "' + word.replaceAll('"', '\\"') + '" and '
-      if (query.length > 0) query = query.substring(0, query.length - 5) 
+      if (query.length > 0) query = query.substring(0, query.length - 5)
       if (query.startsWith('(') && query.endsWith(')')) query = query.substring(1, query.length - 1)
     }
     const postData = {
       drive_id: dir.m_drive_id,
       marker: dir.next_marker,
-      limit: 1 ,
+      limit: 1,
       fields: '*',
       query: query,
       return_total_count: true
@@ -483,8 +499,8 @@ export default class AliDirFileList {
     try {
       if (AliHttp.IsSuccess(resp.code)) {
         return (resp.body.total_count as number) || 0
-      } else {
-        DebugLog.mSaveWarning('_ApiSearchFileListCount err=' + dir.dirID + ' ' + (resp.code || ''))
+      } else if (!AliHttp.HttpCodeBreak(resp.code)) {
+        DebugLog.mSaveWarning('_ApiSearchFileListCount err=' + dir.dirID + ' ' + (resp.code || ''), resp.body)
       }
     } catch (err: any) {
       DebugLog.mSaveDanger('_ApiSearchFileListCount ' + dir.dirID, err)
@@ -492,11 +508,39 @@ export default class AliDirFileList {
     return 0
   }
 
-  static async _ApiVideoListRecent(dir: IAliFileResp): Promise<boolean> {
+  static async _ApiAlbumListOnePage(orderby: string, order: string, dir: IAliFileResp, pageIndex: number): Promise<boolean> {
+    const url = 'adrive/v1/album/list'
+    const postData = {
+      limit: 100,
+      order_by: 'updated_at',
+      order_direction: 'DESC'
+    }
+    const resp = await AliHttp.Post(url, postData, dir.m_user_id, '')
+    return AliDirFileList._FileListOnePage(orderby, order, dir, resp, pageIndex)
+  }
+
+  static async _ApiAlbumListFilesOnePage(orderby: string, order: string, dir: IAliFileResp, pageIndex: number): Promise<boolean> {
+    const url = 'adrive/v1/album/list_files'
+    const postData = {
+      album_id: dir.albumID,
+      fields: '*',
+      filter: '',
+      limit: 100,
+      order_by: 'joined_at',
+      order_direction: 'DESC',
+      image_thumbnail_process: 'image/resize,w_400/format,jpeg',
+      image_url_process: 'image/resize,w_1920/format,jpeg',
+      video_thumbnail_process: 'video/snapshot,t_0,f_jpg,ar_auto,w_1000'
+    }
+    const resp = await AliHttp.Post(url, postData, dir.m_user_id, '')
+    return AliDirFileList._FileListOnePage(orderby, order, dir, resp, pageIndex)
+  }
+
+  static async _ApiVideoListRecent(orderby: string, order: string, dir: IAliFileResp, pageIndex: number): Promise<boolean> {
     const url = 'adrive/v2/video/recentList'
     const postData = {}
     const resp = await AliHttp.Post(url, postData, dir.m_user_id, '')
-    return AliDirFileList._FileListOnePage('', '', dir, resp, 0) 
+    return AliDirFileList._FileListOnePage(orderby, order, dir, resp, pageIndex)
   }
 
   static async _ApiVideoListOnePage(orderby: string, order: string, dir: IAliFileResp, pageIndex: number): Promise<boolean> {
@@ -530,7 +574,7 @@ export default class AliDirFileList {
     return AliDirFileList._FileListOnePage(orderby, order, dir, resp, pageIndex)
   }
 
-  
+
   static _FileListOnePage(orderby: string, order: string, dir: IAliFileResp, resp: IUrlRespData, pageIndex: number, type: string = ''): boolean {
     try {
       if (AliHttp.IsSuccess(resp.code)) {
@@ -547,11 +591,10 @@ export default class AliDirFileList {
 
         dir.next_marker = resp.body.next_marker || ''
         const isRecover = dir.dirID == 'recover'
-        const isDirFile = dir.dirID == 'root' || (dir.dirID.length == 40 && !dir.dirID.startsWith('search'))
+        const isDirFile = dir.dirID.includes('root') || (dir.dirID.length == 40 && !dir.dirID.startsWith('search'))
         const isVideo = dir.dirID.startsWith('video')
-        // const issearch = dir.dirID.startsWith('search')
-        // const iscolor = dir.dirID.startsWith('color')
-        const downUrl = isRecover ? '' : 'https://api.aliyundrive.com/v2/file/download?t=' + Date.now().toString() 
+        const isPic = dir.dirID.includes('pic')
+        const downUrl = isRecover ? '' : 'https://api.aliyundrive.com/v2/file/download?t=' + Date.now().toString()
 
         if (resp.body.items) {
           const driverData = TreeStore.GetDriver(dir.m_drive_id)
@@ -574,19 +617,25 @@ export default class AliDirFileList {
                 item.file_id = item.compilation_id.split('_')[1]
               }
             }
+            if (isPic) {
+              if (!item.album_id && (!item.drive_id || !item.file_id)) continue
+              if (item.album_id) {
+                item.type = 'folder'
+                item.file_id = item.album_id
+              }
+            }
             if (dir.itemsKey.has(item.file_id)) continue
             const add = AliDirFileList.getFileInfo(item, downUrl)
             if (isRecover) add.description = item.content_hash
-            if (isVideo) {
-              add.compilation_id = item.compilation_id
-            }
+            if (isVideo) add.compilation_id = item.compilation_id
+            if (isPic) add.album_id = item.album_id
             if (add.isDir) {
               if (isFolderSize) {
                 add.size = DirTotalSizeMap[add.file_id] || DirFileSizeMap[add.file_id] || 0
                 add.sizeStr = humanSize(add.size)
               }
               if (isDirFile) dirList.push(add)
-              else fileList.push(add) 
+              else fileList.push(add)
             } else fileList.push(add)
             dir.itemsKey.add(item.file_id)
           }
@@ -607,7 +656,9 @@ export default class AliDirFileList {
 
         if (pageIndex >= 0 && type == '') {
           const pan = usePanFileStore()
-          if (pan.DriveID == dir.m_drive_id) pan.mSaveDirFileLoadingPart(pageIndex, dirPart, dir.itemsTotal || 0)
+          if (pan.DriveID == dir.m_drive_id) {
+            pan.mSaveDirFileLoadingPart(pageIndex, dirPart, dir.itemsTotal || 0)
+          }
         }
         if (dirPart.next_marker == 'cancel') dir.next_marker = 'cancel'
         if (isVideo && dir.items.length >= 500) dir.next_marker = ''
@@ -618,11 +669,11 @@ export default class AliDirFileList {
         return true
       } else if (resp.body && resp.body.code) {
         dir.items.length = 0
-        dir.next_marker = resp.body.code 
+        dir.next_marker = resp.body.code
         message.warning('列出文件出错 ' + resp.body.code, 2)
         return false
-      } else {
-        DebugLog.mSaveWarning('_FileListOnePage err=' + dir.dirID + ' ' + (resp.code || ''))
+      } else if (!AliHttp.HttpCodeBreak(resp.code)) {
+        DebugLog.mSaveWarning('_FileListOnePage err=' + dir.dirID + ' ' + (resp.code || ''), resp.body)
       }
     } catch (err: any) {
       DebugLog.mSaveDanger('_FileListOnePage ' + dir.dirID, err)
@@ -631,24 +682,27 @@ export default class AliDirFileList {
     return false
   }
 
-  
-  static async ApiDirFileSize(user_id: string, drive_id: string, file_idList: string[]): Promise<{ dirID: string; size: number }[] | undefined> {
-    const list: Map<string, { dirID: string; size: number }> = new Map<string, { dirID: string; size: number }>()
 
+  static async ApiDirFileSize(user_id: string, drive_id: string, file_idList: string[]): Promise<{
+    dirID: string;
+    size: number
+  }[] | undefined> {
+    const list: Map<string, { dirID: string; size: number }> = new Map<string, { dirID: string; size: number }>()
     let postData = '{"requests":['
     for (let i = 0, maxi = file_idList.length; i < maxi; i++) {
       list.set(file_idList[i], { dirID: file_idList[i], size: 0 })
       if (i > 0) postData = postData + ','
+      let id = file_idList[i].includes('root') ? 'root' : file_idList[i]
       const data2 = {
         body: {
           drive_id: drive_id,
-          query: 'parent_file_id="' + file_idList[i] + '" and type="file"',
+          query: 'parent_file_id="' + id + '" and type="file"',
           limit: 100,
           fields: 'thumbnail',
           order_by: 'size DESC'
         },
         headers: { 'Content-Type': 'application/json' },
-        id: file_idList[i],
+        id: id,
         method: 'POST',
         url: '/file/search'
       }
@@ -664,7 +718,7 @@ export default class AliDirFileList {
         const responses = resp.body.responses
         for (let j = 0, maxj = responses.length; j < maxj; j++) {
           const respi = responses[j]
-          
+
           if (respi.id && respi.status && respi.status >= 200 && respi.status <= 205) {
             if (respi.body && respi.body.items && respi.body.items.length > 0) {
               let size = 0
@@ -676,12 +730,11 @@ export default class AliDirFileList {
               if (find) find.size = size
             }
           }
-          
+
         }
         return MapValueToArray(list)
       } else {
-        
-        DebugLog.mSaveWarning('ApiDirFileSize err=' + (resp.code || ''))
+        DebugLog.mSaveWarning('ApiDirFileSize err=' + (resp.code || ''), resp.body)
         return undefined
       }
     } catch (err: any) {

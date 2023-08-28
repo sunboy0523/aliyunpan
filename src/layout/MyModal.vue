@@ -3,6 +3,7 @@ import { defineComponent } from 'vue'
 import { useModalStore } from '../store'
 import UserSpaceModal from '../user/UserSpaceModal.vue'
 import CreatNewFileModal from '../pan/topbtns/CreatNewFileModal.vue'
+import CreatNewAlbumModal from '../pan/topbtns/CreatNewAlbumModal.vue'
 import RenameModal from '../pan/topbtns/RenameModal.vue'
 import RenameMultiModal from '../pan/topbtns/RenameMultiModal.vue'
 import CreatNewDirModal from '../pan/topbtns/CreatNewDirModal.vue'
@@ -13,7 +14,6 @@ import ShowShareLinkModal from '../share/share/ShowShareLinkModal.vue'
 import SelectPanDirModal from '../pan/topbtns/SelectPanDirModal.vue'
 import CreatNewShareLinkModal from '../pan/topbtns/CreatNewShareLinkModal.vue'
 import ShuXingModal from '../pan/topbtns/ShuXingModal.vue'
-import ShuXingMultiModal from '../pan/topbtns/ShuXingMultiModal.vue'
 import SearchPanModal from '../pan/topbtns/SearchPanModal.vue'
 import DLNAPlayerModal from '../pan/topbtns/DLNAPlayerModal.vue'
 import M3U8DownloadModal from '../pan/topbtns/M3U8DownloadModal.vue'
@@ -23,23 +23,24 @@ import ArchivePasswordModal from '../pan/topbtns/ArchivePasswordModal.vue'
 import AlphaModal from '../pan/topbtns/AlphaModal.vue'
 import UploadModal from '../pan/topbtns/UploadModal.vue'
 import DownloadModal from '../pan/topbtns/DownloadModal.vue'
-import SelectSubTitleModal from '../pan/topbtns/SelectSubTitleModal.vue'
+import MoveToAlbumModal from '../pan/topbtns/MoveToAlbumModal.vue'
 
 export default defineComponent({
   components: {
     UserSpaceModal,
-    CreatNewFileModal,
     RenameModal,
     RenameMultiModal,
+    MoveToAlbumModal,
+    CreatNewFileModal,
+    CreatNewAlbumModal,
     CreatNewDirModal,
+    CreatNewShareLinkModal,
     DaoRuShareLinkModal,
     EditShareLinkModal,
     DaoRuShareLinkMultiModal,
     ShowShareLinkModal,
     SelectPanDirModal,
-    CreatNewShareLinkModal,
     ShuXingModal,
-    ShuXingMultiModal,
     SearchPanModal,
     DLNAPlayerModal,
     M3U8DownloadModal,
@@ -58,24 +59,34 @@ export default defineComponent({
 </script>
 
 <template>
-  <AlphaModal />
+  <!--  <AlphaModal />-->
 
   <UserSpaceModal :visible="modalStore.modalName == 'userspace'" />
   <CreatNewFileModal :visible="modalStore.modalName == 'creatfile'" />
+  <CreatNewAlbumModal :visible="modalStore.modalName == 'creatalbum'" />
+  <MoveToAlbumModal :visible="modalStore.modalName == 'movetoalbum'" :istree='modalStore.modalData.istree || false' />
   <CreatNewDirModal :visible="modalStore.modalName == 'creatdir'" :dirtype="modalStore.modalData.dirtype || ''"
                     :parentdirid="modalStore.modalData.parentdirid || ''" :callback='modalStore.modalData.callback' />
   <CreatNewShareLinkModal :visible="modalStore.modalName == 'creatshare'"
                           :sharetype="modalStore.modalData.sharetype || ''"
+                          :driveType="modalStore.modalData.driveType || ''"
                           :filelist='modalStore.modalData.filelist || []' />
 
-  <DaoRuShareLinkModal :visible="modalStore.modalName == 'daorushare'" />
+  <DaoRuShareLinkModal :visible="modalStore.modalName == 'daorushare'"
+                       :shareUrl="modalStore.modalData.shareUrl || ''"
+                       :sharePwd="modalStore.modalData.sharePwd || ''" />
   <DaoRuShareLinkMultiModal :visible="modalStore.modalName == 'daorusharemulti'" />
 
-  <RenameModal :visible="modalStore.modalName == 'rename'" :istree='modalStore.modalData.istree || false' />
+  <RenameModal :visible="modalStore.modalName == 'rename'"
+               :istree='modalStore.modalData.istree || false'
+               :ispic='modalStore.modalData.ispic || false' />
   <RenameMultiModal :visible="modalStore.modalName == 'renamemulti'" :istree='modalStore.modalData.istree || false' />
-  <ShuXingModal :visible="modalStore.modalName == 'shuxing'" :istree='modalStore.modalData.istree || false' />
-  <ShuXingMultiModal :visible="modalStore.modalName == 'shuxingmulti'" :istree='modalStore.modalData.istree || false' />
-  <SearchPanModal :visible="modalStore.modalName == 'searchpan'" />
+  <ShuXingModal :visible="modalStore.modalName == 'shuxing'"
+                :istree='modalStore.modalData.istree || false'
+                :inputsearchType="modalStore.modalData.inputsearchType || ''"
+                :ispic='modalStore.modalData.ispic || false' />
+  <SearchPanModal :visible="modalStore.modalName == 'searchpan'"
+                  :inputsearchType="modalStore.modalData.inputsearchType || ''" />
 
   <DLNAPlayerModal :visible="modalStore.modalName == 'dlna'" />
   <M3U8DownloadModal :visible="modalStore.modalName == 'm3u8download'" />
@@ -110,15 +121,17 @@ export default defineComponent({
     :withsave='modalStore.modalData.withsave || false'
     :file_id_list='modalStore.modalData.file_id_list || []' />
 
-  <UploadModal :visible="modalStore.modalName == 'upload'" :file_id="modalStore.modalData.file_id || ''"
-               :filelist='modalStore.modalData.filelist || []' />
+  <UploadModal :visible="modalStore.modalName == 'upload'"
+               :file_id="modalStore.modalData.file_id || ''"
+               :filelist='modalStore.modalData.filelist || []'
+               :ispic='modalStore.modalData.ispic || false' />
   <DownloadModal :visible="modalStore.modalName == 'download'" :istree='modalStore.modalData.istree || false' />
 
   <SelectPanDirModal :visible="modalStore.modalName == 'selectpandir'"
                      :selecttype="modalStore.modalData.selecttype || ''"
                      :selectid="modalStore.modalData.selectid || ''"
-                     :category="modalStore.modalData.category"
-                     :extFilter="modalStore.modalData.extFilter"
+                     :category='modalStore.modalData.category'
+                     :extFilter='modalStore.modalData.extFilter'
                      :callback='modalStore.modalData.callback' />
 </template>
 <style>

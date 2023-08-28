@@ -2,7 +2,8 @@
 <script setup lang='ts'>
 import { IAliGetFileModel } from '../aliapi/alimodels'
 import {
-  KeyboardState, MouseState,
+  KeyboardState,
+  MouseState,
   useAppStore,
   useFootStore,
   useKeyboardStore,
@@ -12,13 +13,13 @@ import {
 } from '../store'
 import useWinStore from '../store/winstore'
 import {
+  onHideRightMenuScroll,
   onShowRightMenu,
   TestCtrl,
   TestCtrlShift,
   TestKey,
   TestKeyboardScroll,
-  TestKeyboardSelect,
-  onHideRightMenuScroll
+  TestKeyboardSelect
 } from '../utils/keyboardhelper'
 import { onMounted, ref, watchEffect } from 'vue'
 import PanDAL from './pandal'
@@ -27,16 +28,16 @@ import { Tooltip as AntdTooltip } from 'ant-design-vue'
 import 'ant-design-vue/es/tooltip/style/css'
 
 import {
+  dropMoveSelectedFile,
   handleUpload,
-  topFavorDeleteAll,
-  menuFavSelectFile,
-  menuTrashSelectFile,
   menuCopySelectedFile,
   menuCreatShare,
-  topSearchAll,
-  dropMoveSelectedFile
+  menuFavSelectFile,
+  menuTrashSelectFile,
+  topFavorDeleteAll,
+  topSearchAll
 } from './topbtns/topbtn'
-import { modalCreatNewFile, modalCreatNewDir, modalRename, modalDaoRuShareLink, modalUpload } from '../utils/modal'
+import { modalCreatNewDir, modalCreatNewFile, modalDaoRuShareLink, modalRename, modalUpload } from '../utils/modal'
 import { PanFileState } from './panfilestore'
 import PanTopbtn from './menus/PanTopbtn.vue'
 import FileTopbtn from './menus/FileTopbtn.vue'
@@ -49,22 +50,33 @@ import { menuOpenFile } from '../utils/openfile'
 import { throttle } from '../utils/debounce'
 import { TestButton } from '../utils/mosehelper'
 import usePanTreeStore from './pantreestore'
+import { GetDriveID, GetDriveType } from '../aliapi/utils'
 
 const viewlist = ref()
 const inputsearch = ref()
+const isresourcedrive = ref(false)
+const inputpicType = ref('pic_root')
+const inputsearchType = ref('backup')
+const videoSelectType = ref('recent')
 
 const appStore = useAppStore()
 const settingStore = useSettingStore()
 const winStore = useWinStore()
 const panfileStore = usePanFileStore()
+const panTreeStore = usePanTreeStore()
 
 let dirID = ''
+let DriveID = panfileStore.DriveID
 panfileStore.$subscribe((_m: any, state: PanFileState) => {
   if (state.DirID != dirID) {
     dirID = state.DirID
     if (viewlist.value) viewlist.value.scrollIntoView(0)
   }
-
+  if (state.DriveID != DriveID) {
+    DriveID = state.DriveID
+    isresourcedrive.value = inputsearchType.value.includes('resource')
+    inputsearchType.value = GetDriveType(panTreeStore.user_id, DriveID).name
+  }
   const isTrash = panfileStore.SelectDirType == 'trash' || panfileStore.SelectDirType == 'recover'
   const selectItem = panfileStore.GetSelectedFirst()
   const isShowVideo = !isTrash && panfileStore.ListSelected.size == 1 && selectItem?.category == 'video'
@@ -76,7 +88,9 @@ panfileStore.$subscribe((_m: any, state: PanFileState) => {
 watchEffect(() => {
   const scrollToFile = panfileStore.scrollToFile
   if (scrollToFile) {
-    if (viewlist.value) viewlist.value.scrollIntoView({ key: scrollToFile, align: 'top', offset: 220 })
+    if (viewlist.value) {
+      viewlist.value.scrollIntoView({ key: scrollToFile, offset: 50 })
+    }
     panfileStore.mSaveFileScrollTo('')
   }
 })
@@ -110,9 +124,12 @@ keyboardStore.$subscribe((_m: any, state: KeyboardState) => {
   if (TestKey('f5', state.KeyDownEvent, handleRefresh)) return
   if (TestKey('f6', state.KeyDownEvent, handleDingWei)) return
   if (TestKey('Backspace', state.KeyDownEvent, handleBack)) return
-  if (TestKey('f2', state.KeyDownEvent, () => modalRename(false, panfileStore.IsListSelectedMulti))) return
-  if (TestCtrl('e', state.KeyDownEvent, () => modalRename(false, panfileStore.IsListSelectedMulti))) return
-  if (TestCtrl('s', state.KeyDownEvent, () => menuCreatShare(false, 'pan'))) return
+  if (TestKey('f2', state.KeyDownEvent, () => modalRename(false, panfileStore.IsListSelectedMulti, false))) return
+  if (TestCtrl('e', state.KeyDownEvent, () => modalRename(false, panfileStore.IsListSelectedMulti, false))) return
+  if (TestCtrl('s', state.KeyDownEvent, () => {
+    isresourcedrive && menuCreatShare(false, 'pan', 'resource_root')
+  })) return
+  if (TestCtrl('t', state.KeyDownEvent, () => menuCreatShare(false, 'pan', 'backup_root'))) return
   if (TestCtrl('g', state.KeyDownEvent, () => menuFavSelectFile(false, !panfileStore.IsListSelectedFavAll))) return
   if (TestCtrl('q', state.KeyDownEvent, onSelectRangStart)) return
   if (TestKeyboardSelect(state.KeyDownEvent, viewlist.value, panfileStore, handleOpenFile)) return
@@ -127,21 +144,45 @@ mouseStore.$subscribe((_m: any, state: MouseState) => {
   if (TestButton(0, mouseEvent, () => {
     if (mouseEvent.srcElement) {
       // @ts-ignore
-      if (mouseEvent.srcElement.className && mouseEvent.srcElement.className.toString().startsWith('arco-virtual-list')) {
+      const className = mouseEvent.srcElement.className
+      if (className && className.toString().startsWith('arco-virtual-list')) {
         onSelectCancel()
       }
     }
   })) return
   if (TestButton(3, mouseEvent, () => handleBack())) return
 })
-const handleRefresh = () => PanDAL.aReLoadOneDirToShow('', 'refresh', false)
-const handleDingWei = () => PanDAL.aTreeScrollToDir('refresh')
+const handleRefresh = () => {
+  let album_id = ''
+  if (panfileStore.SelectDirType.includes('pic')) {
+    album_id = panTreeStore.selectDir.file_id
+  }
+  PanDAL.aReLoadOneDirToShow(DriveID, 'refresh', false, album_id)
+}
+const handleDingWei = () => {
+  PanDAL.aTreeScrollToDir('refresh')
+}
+
+const handleChangePic = (value: any) => {
+  panTreeStore.selectDir.album_type = value
+  PanDAL.aReLoadOneDirToShow(DriveID, value, false)
+}
+
+const handleChangeDrive = (value: any) => {
+  DriveID = GetDriveID(panTreeStore.user_id, value)
+  handleRefresh()
+}
+
 const handleBack = () => {
   if (!usePanTreeStore().PanHistoryCount) return
-  PanDAL.aReLoadOneDirToShow('', 'back', false)
+  PanDAL.aReLoadOneDirToShow(DriveID, 'back', false)
 }
-const handleHome = () => PanDAL.aReLoadOneDirToShow('', 'root', false)
-const handleSelectAll = () => panfileStore.mSelectAll()
+const handleHome = () => {
+  PanDAL.aReLoadOneDirToShow('', 'backup_root', false)
+}
+const handleSelectAll = () => {
+  panfileStore.mSelectAll()
+}
 
 
 const handleSelect = (file_id: string, event: any, isCtrl: boolean = false) => {
@@ -179,8 +220,17 @@ const handleSelect = (file_id: string, event: any, isCtrl: boolean = false) => {
     panfileStore.mRefreshListDataShow(false)
   } else {
     panfileStore.mMouseSelect(file_id, event.ctrlKey || isCtrl, event.shiftKey)
-    if(!panfileStore.ListSelected.has(file_id)) panfileStore.ListFocusKey = ''
+    if (!panfileStore.ListSelected.has(file_id)) panfileStore.ListFocusKey = ''
   }
+}
+
+const handleSelectAllCompilation = () => {
+  videoSelectType.value = 'allComp'
+  PanDAL.aReLoadOneDirToShow('', 'video.compilation', true)
+}
+const handleSelectRecentPlay = () => {
+  videoSelectType.value = 'recent'
+  PanDAL.aReLoadOneDirToShow('', 'video.recentplay', true)
 }
 
 const handleOpenFile = (event: Event, file: IAliGetFileModel | undefined) => {
@@ -192,7 +242,7 @@ const handleOpenFile = (event: Event, file: IAliGetFileModel | undefined) => {
   if (!file) return
 
   if (file.isDir) {
-    PanDAL.aReLoadOneDirToShow('', file.compilation_id ? 'video' + file.name : file.file_id, true)
+    PanDAL.aReLoadOneDirToShow('', file.compilation_id ? 'video' + file.name : file.file_id, true, file.album_id)
     return
   }
 
@@ -380,7 +430,7 @@ const onRowItemDrop = (ev: any, movetodirid: string) => {
   ev.preventDefault()
   ev.target.style.outline = 'none'
   ev.target.style.background = ''
-  dropMoveSelectedFile(movetodirid)
+  dropMoveSelectedFile(movetodirid, false)
 }
 const onRowItemDragEnd = (ev: any) => {
   if (dragingRowItem.value) {
@@ -413,7 +463,7 @@ const onPanDrop = (e: any) => {
   if (panfileStore.DirID == 'trash') {
     message.error('不能把文件上传到回收站里！请先选择一个网盘里的文件夹')
   }
-  if (panfileStore.DirID.length != 40 && panfileStore.DirID != 'root') {
+  if (panfileStore.DirID.length != 40 && !panfileStore.DirID.includes('root')) {
     message.error('错误的上传位置！请先选择一个网盘里的文件夹')
     return
   }
@@ -496,9 +546,38 @@ const onPanDragEnd = (ev: any) => {
         </template>
       </a-button>
     </div>
+    <div v-show="panfileStore.SelectDirType.includes('pic')" class='toppanbtn'>
+      <a-select v-model:model-value='inputpicType' size='small' tabindex='-1'
+                @update:model-value='handleChangePic'
+                style='width: 120px; flex-shrink: 0; margin: 0 -8px' :disabled='panfileStore.ListLoading'>
+        <a-option value='pic_root'>全部相册</a-option>
+        <a-option value='mypic'>我的相册</a-option>
+      </a-select>
+    </div>
+    <div v-show="!['pan', 'pic', 'mypic', 'video', 'recover'].includes(panfileStore.SelectDirType)" class='toppanbtn'>
+      <a-select v-model:model-value='inputsearchType' size='small' tabindex='-1'
+                @update:model-value='handleChangeDrive'
+                style='width: 100px; flex-shrink: 0; margin: 0 -8px' :disabled='panfileStore.ListLoading'>
+        <a-option value='backup'>备份盘</a-option>
+        <a-option value='resource'>资源盘</a-option>
+        <a-option v-show="['trash', 'favorite'].includes(panfileStore.SelectDirType)" value='pic'>相册</a-option>
+      </a-select>
+    </div>
+    <div v-if="panfileStore.SelectDirType == 'video'" class='toppanbtn' tabindex='-1'>
+      <a-space direction='horizontal'>
+        <a-button size='small' tabindex='-1'
+                  :type="videoSelectType === 'recent' ? 'dashed' : 'text'" @click='handleSelectRecentPlay'>
+          <i class='iconfont iconfile_video' />正在观看
+        </a-button>
+        <a-button size='small' tabindex='-1'
+                  :type="videoSelectType === 'allComp' ? 'dashed' : 'text'" @click='handleSelectAllCompilation'>
+          <i class='iconfont iconrss_video' />全部专辑
+        </a-button>
+      </a-space>
+    </div>
     <div v-show="panfileStore.SelectDirType == 'favorite'" class='toppanbtn'>
-      <a-button type='text' size='small' tabindex='-1' class='danger' @click='topFavorDeleteAll'><i
-        class='iconfont iconcrown2' />清空收藏夹
+      <a-button type='text' size='small' tabindex='-1' class='danger' @click='topFavorDeleteAll'>
+        <i class='iconfont iconcrown2' />清空收藏夹
       </a-button>
     </div>
     <div v-show="panfileStore.SelectDirType == 'search' && !panfileStore.IsListSelected" class='toppanbtn'>
@@ -510,17 +589,25 @@ const onPanDragEnd = (ev: any) => {
         button-text='搜索'
         search-button
         :input-attrs="{ id: 'searchpanInput' }"
-        @search='(val:string)=>topSearchAll(val)'
-        @press-enter='($event:any)=>topSearchAll($event.srcElement.value as string)'
+        @search='(val:string)=>topSearchAll(val, inputsearchType)'
+        @press-enter='($event:any)=>topSearchAll($event.srcElement.value as string, inputsearchType)'
         @keydown.esc=';($event.target as any).blur()' />
       <a-button type='text' size='small' tabindex='-1' style='border: none'
-                @click="() => topSearchAll('topSearchAll高级搜索')">高级搜索
+                @click="() => topSearchAll('topSearchAll高级搜索', inputsearchType)">高级搜索
       </a-button>
     </div>
 
-    <PanTopbtn :dirtype='panfileStore.SelectDirType' :isselected='panfileStore.IsListSelected' />
-    <FileTopbtn :dirtype='panfileStore.SelectDirType' :isselected='panfileStore.IsListSelected' :isvideo='menuShowVideo'
-                :isselectedmulti='panfileStore.IsListSelectedMulti' :isallfavored='panfileStore.IsListSelectedFavAll' />
+    <PanTopbtn :dirtype='panfileStore.SelectDirType'
+               :inputpicType='inputpicType'
+               :isselected='panfileStore.IsListSelected' />
+    <FileTopbtn :dirtype='panfileStore.SelectDirType'
+                :isselected='panfileStore.IsListSelected'
+                :isvideo='menuShowVideo'
+                :inputsearchType='inputsearchType'
+                :inputpicType='inputpicType'
+                :isselectedmulti='panfileStore.IsListSelectedMulti'
+                :isallfavored='panfileStore.IsListSelectedFavAll'
+                :isallcolored='panfileStore.IsListSelectedColorAll' />
     <TrashTopbtn :dirtype='panfileStore.SelectDirType' :isselected='panfileStore.IsListSelected' />
 
     <div style='flex-grow: 1'></div>
@@ -551,7 +638,7 @@ const onPanDragEnd = (ev: any) => {
     </div>
     <div class='selectInfo'>{{ panfileStore.ListDataSelectCountInfo }}</div>
     <div style='margin: 0 2px'>
-      <AntdTooltip placement='rightTop'>
+      <AntdTooltip placement='rightTop' v-if="panfileStore.SelectDirType !== 'video'">
         <a-button shape='square' type='text' tabindex='-1' class='qujian'
                   :status="rangIsSelecting ? 'danger' : 'normal'" title='Ctrl+Q' @click='onSelectRangStart'>
           {{ rangIsSelecting ? '取消选择' : '区间选择' }}
@@ -566,17 +653,20 @@ const onPanDragEnd = (ev: any) => {
           </div>
         </template>
       </AntdTooltip>
-      <a-button shape='square' v-if='!rangIsSelecting && panfileStore.ListSelected.size > 0' type='text' tabindex='-1' class='qujian'
+      <a-button shape='square' v-if='!rangIsSelecting && panfileStore.ListSelected.size > 0' type='text' tabindex='-1'
+                class='qujian'
                 status='normal' @click='onSelectCancel'>
         取消已选
       </a-button>
     </div>
     <div style='flex-grow: 1'></div>
-    <div class='fileorder'>
+    <div class='fileorder' v-if='panfileStore.SelectDirType !== "pic"'>
       <a-dropdown trigger='hover' position='bl' @select='(val:any)=>handleFileListOrder(val as string)'>
-        <a-button type='text' size='small' tabindex='-1' :disabled='panfileStore.ListLoading'><i
-          class='iconfont iconpaixu1' />{{ panfileStore.FileOrderDesc }} <i class='iconfont icondown' /></a-button>
-
+        <a-button type='text' size='small' tabindex='-1' :disabled='panfileStore.ListLoading'>
+          <i class='iconfont iconpaixu1' />
+          {{ panfileStore.FileOrderDesc }}
+          <i class='iconfont icondown' />
+        </a-button>
         <template #content>
           <a-doption value='name asc'>
             <template #default>　名称 · 升序　</template>
@@ -674,7 +764,8 @@ const onPanDragEnd = (ev: any) => {
               :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
               <a-button shape='circle' type='text' tabindex='-1' class='select' :title='index'
                         @click.prevent.stop='handleSelect(item.file_id, $event, true)'>
-                <i :class="panfileStore.ListSelected.has(item.file_id) ? (item.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : item.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
+                <i
+                  :class="panfileStore.ListSelected.has(item.file_id) ? (item.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : item.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
               </a-button>
             </div>
             <div class='fileicon'>
@@ -686,7 +777,7 @@ const onPanDragEnd = (ev: any) => {
               </div>
             </div>
             <div class='filebtn'>
-              <a-button v-if='item.description' type='text' tabindex='-1' class='label' title='标记'>
+              <a-button v-if='!item.album_id && item.description' type='text' tabindex='-1' class='label' title='标记'>
                 <i class='iconfont iconwbiaoqian' :class='item.description' />
               </a-button>
               <a-popover v-if='item.thumbnail' content-class='popimg' position='lt'>
@@ -702,7 +793,8 @@ const onPanDragEnd = (ev: any) => {
               <a-button v-else type='text' tabindex='-1' class='gengduo' disabled></a-button>
             </div>
 
-            <div class='filesize'>{{ item.sizeStr }}</div>
+            <div v-show='!item.album_id' class='filesize'>{{ item.sizeStr }}</div>
+            <div v-show='item.file_count' class='filesize'>{{ '文件数: ' + item.file_count }}</div>
             <div class='filetime'>{{ item.timeStr }}</div>
           </div>
           <div
@@ -714,10 +806,12 @@ const onPanDragEnd = (ev: any) => {
             @contextmenu='(event:MouseEvent)=>handleRightClick({event,node:{key:item.file_id}} )'
             @dragstart='(ev) => onRowItemDragStart(ev, item.file_id)'
             @dragend='onRowItemDragEnd'>
-            <div :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
+            <div
+              :class="'rangselect ' + (rangSelectFiles[item.file_id] ? (rangSelectStart == item.file_id ? 'rangstart' : rangSelectEnd == item.file_id ? 'rangend' : 'rang') : '')">
               <a-button shape='circle' type='text' tabindex='-1' class='select' :title='index'
                         @click.prevent.stop='handleSelect(item.file_id, $event, true)'>
-                <i :class="panfileStore.ListSelected.has(item.file_id) ? (item.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : item.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
+                <i
+                  :class="panfileStore.ListSelected.has(item.file_id) ? (item.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : item.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
               </a-button>
             </div>
             <div class='fileicon'>
@@ -820,7 +914,8 @@ const onPanDragEnd = (ev: any) => {
                   <a-button shape='circle' type='text' tabindex='-1' class='select'
                             :title='(index * listGridColumn + gindex).toString()'
                             @click.prevent.stop='handleSelect(grid.file_id, $event, true)'>
-                    <i :class="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : grid.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
+                    <i
+                      :class="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : grid.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
                   </a-button>
                   <a-button v-if='grid.description' type='text' tabindex='-1' class='label' title='标记'>
                     <i class='iconfont iconwbiaoqian' :class='grid.description' />
@@ -863,7 +958,8 @@ const onPanDragEnd = (ev: any) => {
                   <a-button shape='circle' type='text' tabindex='-1' class='select'
                             :title='(index * listGridColumn + gindex).toString()'
                             @click.prevent.stop='handleSelect(grid.file_id, $event, true)'>
-                    <i :class="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : grid.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
+                    <i
+                      :class="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : grid.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
                   </a-button>
                   <a-button v-if='grid.description' type='text' tabindex='-1' class='label' title='标记'>
                     <i class='iconfont iconwbiaoqian' :class='grid.description' />
@@ -941,7 +1037,8 @@ const onPanDragEnd = (ev: any) => {
                   <a-button shape='circle' type='text' tabindex='-1' class='select'
                             :title='(index * listGridColumn + gindex).toString()'
                             @click.prevent.stop='handleSelect(grid.file_id, $event, true)'>
-                    <i :class="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : grid.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
+                    <i
+                      :class="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : grid.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
                   </a-button>
                   <a-button v-if='grid.description' type='text' tabindex='-1' class='label' title='标记'>
                     <i class='iconfont iconwbiaoqian' :class='grid.description' />
@@ -987,7 +1084,8 @@ const onPanDragEnd = (ev: any) => {
                   <a-button shape='circle' type='text' tabindex='-1' class='select'
                             :title='(index * listGridColumn + gindex).toString()'
                             @click.prevent.stop='handleSelect(grid.file_id, $event, true)'>
-                    <i :class="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : grid.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
+                    <i
+                      :class="panfileStore.ListSelected.has(grid.file_id) ? (grid.starred ? 'iconfont iconcrown3' : 'iconfont iconrsuccess') : grid.starred ? 'iconfont iconcrown' : 'iconfont iconpic2'" />
                   </a-button>
                   <a-button v-if='grid.description' type='text' tabindex='-1' class='label' title='标记'>
                     <i class='iconfont iconwbiaoqian' :class='grid.description' />
@@ -1000,8 +1098,12 @@ const onPanDragEnd = (ev: any) => {
       </template>
     </a-list>
 
-    <FileRightMenu :dirtype='panfileStore.SelectDirType' :isvideo='menuShowVideo'
-                   :isselected='panfileStore.IsListSelected' :isselectedmulti='panfileStore.IsListSelectedMulti'
+    <FileRightMenu :dirtype='panfileStore.SelectDirType'
+                   :isvideo='menuShowVideo'
+                   :isselected='panfileStore.IsListSelected'
+                   :isselectedmulti='panfileStore.IsListSelectedMulti'
+                   :inputsearchType='inputsearchType'
+                   :inputpicType='inputpicType'
                    :isallfavored='panfileStore.IsListSelectedFavAll' />
     <TrashRightMenu :dirtype='panfileStore.SelectDirType' />
   </div>
